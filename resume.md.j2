@@ -2,36 +2,79 @@
     target_tag: the variant being built (e.g. "csharp", "python")
     An entry/bullet with no x-tags is treated as common (shown in all variants).
     A bullet with no x-tags inherits its parent entry's tags.
+    "backend" is a pass-through tag that appears in all variants.
 -#}
 
 {%- macro visible(node_tags, parent_tags=None) -%}
-  {#- Returns True if this node should appear in the target variant. -#}
+  {#- Returns True if this node should appear in the target variant.
+      "backend" is a pass-through ONLY when no other variant-specific tag is present.
+      e.g. [backend] → all variants; [backend, csharp] → csharp only. -#}
   {%- set effective = node_tags if node_tags is not none else (parent_tags if parent_tags else ["common"]) -%}
-  {{ target_tag in effective or "common" in effective }}
+  {%- set _other = ["csharp", "python"] | reject("equalto", target_tag) | list -%}
+  {%- set _restricted = effective | select("in", _other) | list | length > 0 -%}
+  {{ target_tag in effective or "common" in effective or ("backend" in effective and not _restricted) }}
 {%- endmacro -%}
 
-# {{ data.basics.name }}
+{#- Template-level variable for inline conditions below -#}
+{%- set other_variants = ["csharp", "python"] | reject("equalto", target_tag) | list -%}
 
-{{ data.basics.email }} | {{ data.basics.phone }} | {{ data.basics.location }}
+# {{ data.meta.name }}
+
+**{{ data.meta.title }}**
+
+{{ data.meta.email }} | {{ data.meta.phone }} | {{ data.meta.location }} | {{ data.meta.linkedin }}
+
+*{{ data.meta.open_to }}*
+
+---
+
+## Summary
+
+{{ data.summary }}
+
+---
+
+## Skills
+
+{% for category, items in data.skills.items() %}
+**{{ category | title }}:** {{ items | join(", ") }}
+
+{% endfor %}
 
 ---
 
 ## Experience
 
-{% for job in data.work %}
+{% for job in data.experience %}
 {%- set job_tags = job.get("x-tags", ["common"]) %}
-{%- if not job.get("x-hidden") and (target_tag in job_tags or "common" in job_tags) %}
+{%- if not job.get("x-hidden") and (target_tag in job_tags or "common" in job_tags or ("backend" in job_tags and not (job_tags | select("in", other_variants) | list))) %}
 
-### {{ job.position }} — {{ job.company }}
+### {{ job.role }} — {{ job.company }}
 
-*{{ job.startDate }} – {{ job.get("endDate", "present") }}*
+*{{ job.period }}*{% if job.location %} | {{ job.location }}{% endif %}
 
-{% for h in job.get("highlights", []) %}
-{%- set bullet_tags = h.get("x-tags", job_tags) %}
-{%- if target_tag in bullet_tags or "common" in bullet_tags %}
-- {{ h.text }}
+{% if job.projects %}
+{% for project in job.projects %}
+{%- set proj_tags = project.get("x-tags", job_tags) %}
+{%- if target_tag in proj_tags or "common" in proj_tags or ("backend" in proj_tags and not (proj_tags | select("in", other_variants) | list)) %}
+**{{ project.name }}** *({{ project.period }})*
+
+{% for bullet in project.get("bullets", []) %}
+{%- set bullet_tags = bullet.get("x-tags", proj_tags) %}
+{%- if target_tag in bullet_tags or "common" in bullet_tags or ("backend" in bullet_tags and not (bullet_tags | select("in", other_variants) | list)) %}
+- {{ bullet.text }}
 {% endif %}
 {%- endfor %}
+{% endif %}
+{%- endfor %}
+{% else %}
+{% for bullet in job.get("bullets", []) %}
+{%- set bullet_tags = bullet.get("x-tags", job_tags) %}
+{%- if target_tag in bullet_tags or "common" in bullet_tags or ("backend" in bullet_tags and not (bullet_tags | select("in", other_variants) | list)) %}
+- {{ bullet.text }}
+{% endif %}
+{%- endfor %}
+{% endif %}
 {% endif %}
 {%- endfor %}
 
@@ -40,14 +83,22 @@
 ## Education
 
 {% for edu in data.education %}
-**{{ edu.studyType }}, {{ edu.area }}** — {{ edu.institution }}
-*Graduated {{ edu.endDate }}*
+**{{ edu.credential }}** — {{ edu.institution }}{% if edu.year %} *({{ edu.year }})*{% endif %}
 {% endfor %}
 
 ---
 
-## Skills
+## Certifications
 
-{% for skill_group in data.skills %}
-**{{ skill_group.name }}:** {% set kws = [] %}{% for kw in skill_group.get("keywords", []) %}{% set kw_tags = kw.get("x-tags", ["common"]) if kw is mapping else ["common"] %}{% if target_tag in kw_tags or "common" in kw_tags %}{% if kws.append(kw.name if kw is mapping else kw) %}{% endif %}{% endif %}{% endfor %}{{ kws | join(", ") }}
+{% for cert in data.certifications if cert.name %}
+- **{{ cert.name }}**{% if cert.issuer %}, {{ cert.issuer }}{% endif %}{% if cert.year %} ({{ cert.year }}){% endif %}
+
+{% endfor %}
+
+---
+
+## Languages
+
+{% for lang in data.languages %}
+- **{{ lang.language }}**: {{ lang.level }}
 {% endfor %}
