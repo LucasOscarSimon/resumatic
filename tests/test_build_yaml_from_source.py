@@ -491,13 +491,13 @@ class TestAssignXtags:
 
 
 class TestNullTagger:
-    def test_returns_empty_list(self):
+    def test_returns_backend_only(self):
         tagger = bys.NullTagger()
         result = tagger.tag("Built a REST API in C#.", {"company": "Acme", "role": "Dev", "period": "2022"})
-        assert result == []
+        assert result == ["backend"]
 
-    def test_empty_result_triggers_backend_fallback_in_parse_experience(self):
-        """_parse_experience with NullTagger should tag every bullet [backend]."""
+    def test_tags_every_bullet_backend_in_parse_experience(self):
+        """_parse_experience with NullTagger should tag every bullet ["backend"]."""
         lines = [
             "**Acme Corp** \\| Senior Developer*Jan 2022 -- Present \\| Remote*",
             "",
@@ -508,8 +508,16 @@ class TestNullTagger:
         assert len(entries) == 1
         assert entries[0]["bullets"][0]["x-tags"] == ["backend"]
 
-    def test_no_tagger_uses_assign_xtags(self):
-        """_parse_experience with tagger=None (default) falls back to assign_xtags keyword matching."""
+
+class TestKeywordTagger:
+    def test_delegates_to_assign_xtags(self):
+        tagger = bys.KeywordTagger()
+        result = tagger.tag("Built a REST API in C#.", {"company": "Acme", "role": "Dev", "period": "2022"})
+        assert "backend" in result
+        assert "csharp" in result
+
+    def test_default_tagger_in_parse_experience(self):
+        """_parse_experience with tagger=None defaults to KeywordTagger."""
         lines = [
             "**Acme Corp** \\| Senior Developer*Jan 2022 -- Present \\| Remote*",
             "",
@@ -519,7 +527,7 @@ class TestNullTagger:
         assert len(entries) == 1
         tags = entries[0]["bullets"][0]["x-tags"]
         assert "backend" in tags
-        assert "csharp" in tags  # assign_xtags picks up C# keyword
+        assert "csharp" in tags  # KeywordTagger picks up C# keyword
 
 
 # ---------------------------------------------------------------------------
@@ -583,7 +591,7 @@ class TestClaudeTagger:
 
         assert result == ["backend", "csharp"]
 
-    def test_api_failure_returns_empty_list(self):
+    def test_api_failure_returns_backend_fallback(self):
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = Exception("network error")
         mock_anthropic = MagicMock()
@@ -592,9 +600,9 @@ class TestClaudeTagger:
         tagger = self._make_tagger(mock_client, mock_anthropic)
         result = tagger.tag("Some bullet.", {"company": "X", "role": "Y", "period": ""})
 
-        assert result == []
+        assert result == ["backend"]
 
-    def test_invalid_json_response_returns_empty_list(self):
+    def test_invalid_json_response_returns_backend_fallback(self):
         mock_resp = Mock()
         mock_resp.content = [Mock(text="not valid json at all")]
         mock_client = MagicMock()
@@ -605,7 +613,7 @@ class TestClaudeTagger:
         tagger = self._make_tagger(mock_client, mock_anthropic)
         result = tagger.tag("Some bullet.", {"company": "X", "role": "Y", "period": ""})
 
-        assert result == []
+        assert result == ["backend"]
 
 
 # ---------------------------------------------------------------------------
@@ -614,14 +622,14 @@ class TestClaudeTagger:
 
 
 class TestGetTagger:
-    def test_none_returns_none(self):
-        # "none" means "use built-in keyword matching" — no tagger object needed
-        assert bys.get_tagger("none") is None
+    def test_none_returns_keyword_tagger(self):
+        tagger = bys.get_tagger("none")
+        assert isinstance(tagger, bys.KeywordTagger)
 
-    def test_claude_missing_key_returns_none_and_warns(self, monkeypatch, capsys):
+    def test_claude_missing_key_returns_keyword_tagger_and_warns(self, monkeypatch, capsys):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         tagger = bys.get_tagger("claude")
-        assert tagger is None
+        assert isinstance(tagger, bys.KeywordTagger)
         assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
 
     def test_claude_with_key_returns_claude_tagger(self, monkeypatch):

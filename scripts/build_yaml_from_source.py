@@ -152,15 +152,22 @@ class BulletTagger(abc.ABC):
         """Return a list of x-tags for the given bullet.
 
         context keys: company, role, period
-        Returns [] to signal "no tags" — caller applies ["backend"] as fallback.
+        Must always return a non-empty list — at minimum ["backend"].
         """
 
 
-class NullTagger(BulletTagger):
-    """No-op tagger — returns [] for all bullets (triggers ["backend"] fallback)."""
+class KeywordTagger(BulletTagger):
+    """Deterministic tagger — assigns x-tags via regex keyword matching."""
 
     def tag(self, bullet_text: str, context: dict) -> list[str]:
-        return []
+        return assign_xtags(bullet_text)
+
+
+class NullTagger(BulletTagger):
+    """Minimal tagger — tags every bullet as ["backend"] only."""
+
+    def tag(self, bullet_text: str, context: dict) -> list[str]:
+        return ["backend"]
 
 
 class ClaudeTagger(BulletTagger):
@@ -181,7 +188,7 @@ class ClaudeTagger(BulletTagger):
 
     def tag(self, bullet_text: str, context: dict) -> list[str]:
         if self._client is None:
-            return []
+            return ["backend"]
         user_msg = (
             f"Company: {context.get('company', '')}, Role: {context.get('role', '')}\n"
             f"Bullet: {bullet_text}"
@@ -199,18 +206,16 @@ class ClaudeTagger(BulletTagger):
                 return tags
         except Exception:
             pass
-        return []
+        return ["backend"]
 
 
-def get_tagger(provider: str) -> BulletTagger | None:
+def get_tagger(provider: str) -> BulletTagger:
     """Factory — return a BulletTagger for the given provider name.
 
-    Returns None to signal "use built-in keyword matching" (assign_xtags).
-
     Supported providers:
-        "none"   — None (offline keyword matching via assign_xtags)
+        "none"   — KeywordTagger (offline regex keyword matching)
         "claude" — ClaudeTagger (calls claude-haiku-4-5-20251001)
-                   Falls back to None if ANTHROPIC_API_KEY is not set.
+                   Falls back to KeywordTagger if ANTHROPIC_API_KEY is not set.
 
     Adding a new provider is a one-class addition.
     """
@@ -220,9 +225,9 @@ def get_tagger(provider: str) -> BulletTagger | None:
                 "warning: ANTHROPIC_API_KEY not set — falling back to keyword matching.",
                 file=sys.stderr,
             )
-            return None
+            return KeywordTagger()
         return ClaudeTagger()
-    return None
+    return KeywordTagger()
 
 
 # ---------------------------------------------------------------------------
@@ -728,6 +733,8 @@ def _try_parse_entry(block: str) -> dict | None:
 
 
 def _parse_experience(lines: list[str], tagger: BulletTagger | None = None) -> list[dict]:
+    if tagger is None:
+        tagger = KeywordTagger()
     blocks = _blocks(lines)
     entries: list[dict] = []
     current: dict | None = None
@@ -834,16 +841,12 @@ def _parse_experience(lines: list[str], tagger: BulletTagger | None = None) -> l
         if bm:
             text = _strip_md(bm.group(1)).strip()
             if text:
-                if tagger is not None:
-                    ctx = {
-                        "company": current.get("company", "") if current else "",
-                        "role": current.get("role", "") if current else "",
-                        "period": current.get("period", "") if current else "",
-                    }
-                    raw = tagger.tag(text, ctx)
-                    tags = raw if raw else ["backend"]
-                else:
-                    tags = assign_xtags(text)
+                ctx = {
+                    "company": current.get("company", "") if current else "",
+                    "role": current.get("role", "") if current else "",
+                    "period": current.get("period", "") if current else "",
+                }
+                tags = tagger.tag(text, ctx)
                 bullet = {"text": text, "x-tags": FlowList(tags)}
                 if current_project is not None:
                     current_project["bullets"].append(bullet)
@@ -973,6 +976,8 @@ def _parse_languages(lines: list[str]) -> list[dict]:
 
 def parse_markdown(text: str, tagger: BulletTagger | None = None) -> dict:
     """Parse CV text (pandoc markdown or plain markdown) into the YAML schema."""
+    if tagger is None:
+        tagger = KeywordTagger()
     lines = text.splitlines()
     sections = _split_sections(lines)
     edu_entries, cert_from_edu = _parse_edu_cert_section(sections.get("education", []))
