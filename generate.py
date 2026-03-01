@@ -45,8 +45,10 @@ def compile_pdf(md_path: Path, css_path: Path, pdf_path: Path) -> None:
         sys.exit(result.returncode)
 
 
-def compile_docx(md_path: Path, docx_path: Path) -> None:
+def compile_docx(md_path: Path, docx_path: Path, reference_doc: Path | None = None) -> None:
     cmd = ["pandoc", str(md_path), "-o", str(docx_path)]
+    if reference_doc is not None:
+        cmd.append(f"--reference-doc={reference_doc}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"[error] pandoc failed for {md_path.name}:\n{result.stderr}", file=sys.stderr)
@@ -54,7 +56,8 @@ def compile_docx(md_path: Path, docx_path: Path) -> None:
 
 
 def build_variant(
-    data: dict, tag: str, template: Path, css: Path, formats: set[str] | None = None,
+    data: dict, tag: str, template: Path, css: Path,
+    formats: set[str] | None = None, reference_doc: Path | None = None,
 ) -> None:
     if formats is None:
         formats = {"md", "pdf", "docx"}
@@ -72,7 +75,7 @@ def build_variant(
 
     if "docx" in formats:
         docx_path = BUILD / f"resume-{tag}.docx"
-        compile_docx(md_path, docx_path)
+        compile_docx(md_path, docx_path, reference_doc)
         print(f"  wrote {docx_path.relative_to(ROOT)}")
 
 
@@ -116,11 +119,13 @@ def main() -> None:
     data = load_yaml(ROOT / "resume.yaml")
     template = ROOT / "resume.md.j2"
     css = resolve_theme(args.theme)
+    ref_doc = ROOT / "templates" / "reference.docx"
+    reference_doc = ref_doc if ref_doc.exists() else None
 
     targets = [args.variant] if args.variant else VARIANTS
     for tag in targets:
         print(f"Building variant: {tag}")
-        build_variant(data, tag, template, css, formats)
+        build_variant(data, tag, template, css, formats, reference_doc)
 
     print("Done.")
 

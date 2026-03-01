@@ -268,6 +268,40 @@ class TestBuildVariantFormats:
         assert len(md_file.read_text()) > 0
 
 
+class TestReferenceDoc:
+    """Test that compile_docx passes --reference-doc when provided."""
+
+    def _docx_cmd(self, tmp_path, reference_doc=None):
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+
+        css = generate.resolve_theme("classic")
+        with (
+            patch.object(generate, "BUILD", tmp_path),
+            patch.object(generate, "ROOT", tmp_path),
+            patch("subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            generate.build_variant(
+                FIXTURE_DATA, "csharp", TEMPLATE_PATH, css,
+                formats={"md", "docx"}, reference_doc=reference_doc,
+            )
+
+        # Return the docx pandoc command (second call would be docx, but we only have docx)
+        calls = [c.args[0] for c in mock_run.call_args_list]
+        assert len(calls) == 1
+        return calls[0]
+
+    def test_reference_doc_included_when_provided(self, tmp_path):
+        ref = Path("/fake/reference.docx")
+        cmd = self._docx_cmd(tmp_path, reference_doc=ref)
+        assert f"--reference-doc={ref}" in cmd
+
+    def test_reference_doc_omitted_when_none(self, tmp_path):
+        cmd = self._docx_cmd(tmp_path, reference_doc=None)
+        assert not any("--reference-doc" in arg for arg in cmd)
+
+
 class TestFormatFlagParsing:
     """Test that --format maps to the correct formats set."""
 

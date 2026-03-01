@@ -4,7 +4,6 @@ PYTHON        := .venv/bin/python3
 SCRIPT        := generate.py
 BUILD         := build
 THEME         ?= classic
-REFERENCE_DOC := templates/reference.docx
 
 # Build all variants
 all:
@@ -21,10 +20,9 @@ csharp:
 python:
 	$(PYTHON) $(SCRIPT) --variant python --theme $(THEME)
 
-# Build DOCX output for all variants using the reference doc for styling
+# Build DOCX output for all variants (uses reference.docx automatically if present)
 docx:
-	pandoc $(BUILD)/resume-csharp.md -o $(BUILD)/resume-csharp.docx --reference-doc=$(REFERENCE_DOC)
-	pandoc $(BUILD)/resume-python.md -o $(BUILD)/resume-python.docx --reference-doc=$(REFERENCE_DOC)
+	$(PYTHON) $(SCRIPT) --format docx --theme $(THEME)
 
 # Install Python dependencies
 install:
