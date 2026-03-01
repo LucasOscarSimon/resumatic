@@ -13,8 +13,10 @@ Confidence thresholds (any one triggers the Claude fallback):
 
 from __future__ import annotations
 
+import abc
 import argparse
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -122,6 +124,105 @@ def assign_xtags(text: str) -> list[str]:
         if pat.search(text):
             tags.append(tag)
     return tags
+
+
+# ---------------------------------------------------------------------------
+# Bullet tagger — provider interface
+# ---------------------------------------------------------------------------
+
+_TAGGER_MODEL = "claude-haiku-4-5-20251001"
+
+_TAGGER_SYSTEM = """\
+You are a CV tagging assistant. Given a resume bullet point, assign one or more \
+tags from this taxonomy:
+- "python": the work itself is Python-specific (not just mentioned in stack)
+- "csharp": the work itself is C#/.NET-specific
+- "backend": general backend work, language-agnostic
+- "common": appears in all variants regardless of target
+Respond with only a JSON array of tags, e.g. ["backend"] or ["csharp"].
+A bullet can have multiple tags if genuinely applicable to both variants.\
+"""
+
+
+class BulletTagger(abc.ABC):
+    """Abstract base class for semantic bullet point taggers."""
+
+    @abc.abstractmethod
+    def tag(self, bullet_text: str, context: dict) -> list[str]:
+        """Return a list of x-tags for the given bullet.
+
+        context keys: company, role, period
+        Returns [] to signal "no tags" — caller applies ["backend"] as fallback.
+        """
+
+
+class NullTagger(BulletTagger):
+    """No-op tagger — returns [] for all bullets (triggers ["backend"] fallback)."""
+
+    def tag(self, bullet_text: str, context: dict) -> list[str]:
+        return []
+
+
+class ClaudeTagger(BulletTagger):
+    """Semantic tagger that calls claude-haiku to assign x-tags per bullet."""
+
+    def __init__(self) -> None:
+        try:
+            import anthropic as _mod
+
+            self._mod = _mod
+        except ImportError:
+            self._mod = None
+            self._client = None
+            return
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        self._client = self._mod.Anthropic(api_key=api_key) if api_key else None
+
+    def tag(self, bullet_text: str, context: dict) -> list[str]:
+        if self._client is None:
+            return []
+        user_msg = (
+            f"Company: {context.get('company', '')}, Role: {context.get('role', '')}\n"
+            f"Bullet: {bullet_text}"
+        )
+        try:
+            resp = self._client.messages.create(
+                model=_TAGGER_MODEL,
+                max_tokens=64,
+                system=_TAGGER_SYSTEM,
+                messages=[{"role": "user", "content": user_msg}],
+            )
+            raw = resp.content[0].text.strip()
+            tags = json.loads(raw)
+            if isinstance(tags, list) and all(isinstance(t, str) for t in tags):
+                return tags
+        except Exception:
+            pass
+        return []
+
+
+def get_tagger(provider: str) -> BulletTagger | None:
+    """Factory — return a BulletTagger for the given provider name.
+
+    Returns None to signal "use built-in keyword matching" (assign_xtags).
+
+    Supported providers:
+        "none"   — None (offline keyword matching via assign_xtags)
+        "claude" — ClaudeTagger (calls claude-haiku-4-5-20251001)
+                   Falls back to None if ANTHROPIC_API_KEY is not set.
+
+    Adding a new provider is a one-class addition.
+    """
+    if provider == "claude":
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            print(
+                "warning: ANTHROPIC_API_KEY not set — falling back to keyword matching.",
+                file=sys.stderr,
+            )
+            return None
+        return ClaudeTagger()
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -626,7 +727,7 @@ def _try_parse_entry(block: str) -> dict | None:
     }
 
 
-def _parse_experience(lines: list[str]) -> list[dict]:
+def _parse_experience(lines: list[str], tagger: BulletTagger | None = None) -> list[dict]:
     blocks = _blocks(lines)
     entries: list[dict] = []
     current: dict | None = None
@@ -733,7 +834,17 @@ def _parse_experience(lines: list[str]) -> list[dict]:
         if bm:
             text = _strip_md(bm.group(1)).strip()
             if text:
-                bullet = {"text": text, "x-tags": FlowList(assign_xtags(text))}
+                if tagger is not None:
+                    ctx = {
+                        "company": current.get("company", "") if current else "",
+                        "role": current.get("role", "") if current else "",
+                        "period": current.get("period", "") if current else "",
+                    }
+                    raw = tagger.tag(text, ctx)
+                    tags = raw if raw else ["backend"]
+                else:
+                    tags = assign_xtags(text)
+                bullet = {"text": text, "x-tags": FlowList(tags)}
                 if current_project is not None:
                     current_project["bullets"].append(bullet)
                 else:
@@ -860,7 +971,7 @@ def _parse_languages(lines: list[str]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def parse_markdown(text: str) -> dict:
+def parse_markdown(text: str, tagger: BulletTagger | None = None) -> dict:
     """Parse CV text (pandoc markdown or plain markdown) into the YAML schema."""
     lines = text.splitlines()
     sections = _split_sections(lines)
@@ -869,7 +980,7 @@ def parse_markdown(text: str) -> dict:
         "meta": _parse_meta(sections.get("_header", []), text),
         "summary": _parse_summary(sections),
         "skills": _parse_skills(sections.get("skills", [])),
-        "experience": _parse_experience(sections.get("experience", [])),
+        "experience": _parse_experience(sections.get("experience", []), tagger),
         "education": edu_entries,
         "certifications": _parse_certifications(sections.get("certifications", [])) + cert_from_edu,
         "languages": _parse_languages(sections.get("languages", [])),
@@ -1145,6 +1256,12 @@ def main() -> None:
         action="store_true",
         help="Force the Claude API path, skipping deterministic parsing",
     )
+    parser.add_argument(
+        "--tagger",
+        choices=["claude", "none"],
+        default="none",
+        help="Bullet tagging provider for the deterministic parse path (default: none)",
+    )
     args = parser.parse_args()
 
     # 1. Resolve source file
@@ -1162,6 +1279,7 @@ def main() -> None:
     print(f"done ({len(text):,} chars)")
 
     # 4. Parse — deterministic primary, Claude fallback
+    tagger = get_tagger(args.tagger)
     path_taken: str
     if args.ai:
         print("Parsing via Claude API (--ai flag)...")
@@ -1169,7 +1287,7 @@ def main() -> None:
         path_taken = "used Claude API (--ai flag)"
     else:
         print("Parsing deterministically...", end=" ", flush=True)
-        data = parse_markdown(text)
+        data = parse_markdown(text, tagger)
         low_confidence, reason = check_confidence(data, source_path, text)
         if low_confidence:
             print(f"low confidence ({reason})")
