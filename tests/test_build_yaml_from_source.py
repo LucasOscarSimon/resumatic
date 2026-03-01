@@ -483,3 +483,150 @@ class TestAssignXtags:
     def test_data_keywords(self):
         tags = bys.assign_xtags("Built ETL pipeline reading Parquet files from MicroStrategy.")
         assert "data" in tags
+
+
+# ---------------------------------------------------------------------------
+# Test 12: NullTagger
+# ---------------------------------------------------------------------------
+
+
+class TestNullTagger:
+    def test_returns_empty_list(self):
+        tagger = bys.NullTagger()
+        result = tagger.tag("Built a REST API in C#.", {"company": "Acme", "role": "Dev", "period": "2022"})
+        assert result == []
+
+    def test_empty_result_triggers_backend_fallback_in_parse_experience(self):
+        """_parse_experience with NullTagger should tag every bullet [backend]."""
+        lines = [
+            "**Acme Corp** \\| Senior Developer*Jan 2022 -- Present \\| Remote*",
+            "",
+            "- Built a C# REST API with Entity Framework.",
+        ]
+        tagger = bys.NullTagger()
+        entries = bys._parse_experience(lines, tagger)
+        assert len(entries) == 1
+        assert entries[0]["bullets"][0]["x-tags"] == ["backend"]
+
+    def test_no_tagger_uses_assign_xtags(self):
+        """_parse_experience with tagger=None (default) falls back to assign_xtags keyword matching."""
+        lines = [
+            "**Acme Corp** \\| Senior Developer*Jan 2022 -- Present \\| Remote*",
+            "",
+            "- Built a C# REST API with Entity Framework.",
+        ]
+        entries = bys._parse_experience(lines, tagger=None)
+        assert len(entries) == 1
+        tags = entries[0]["bullets"][0]["x-tags"]
+        assert "backend" in tags
+        assert "csharp" in tags  # assign_xtags picks up C# keyword
+
+
+# ---------------------------------------------------------------------------
+# Test 13: ClaudeTagger (mocked API)
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeTagger:
+    def _make_tagger(self, mock_client, mock_anthropic_mod):
+        """Helper: patch anthropic import and env, return a ClaudeTagger."""
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}),
+            patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}),
+        ):
+            return bys.ClaudeTagger()
+
+    def test_calls_correct_model(self):
+        mock_resp = Mock()
+        mock_resp.content = [Mock(text='["backend"]')]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_resp
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+
+        tagger = self._make_tagger(mock_client, mock_anthropic)
+        tagger.tag("Built a service.", {"company": "X", "role": "Y", "period": "Z"})
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert call_kwargs["model"] == bys._TAGGER_MODEL
+
+    def test_prompt_includes_company_role_and_bullet(self):
+        mock_resp = Mock()
+        mock_resp.content = [Mock(text='["backend", "csharp"]')]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_resp
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+
+        tagger = self._make_tagger(mock_client, mock_anthropic)
+        tagger.tag(
+            "Implemented CQRS pipeline in C#.",
+            {"company": "Acme Corp", "role": "Senior Dev", "period": "2022 – Present"},
+        )
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        user_content = call_kwargs["messages"][0]["content"]
+        assert "Acme Corp" in user_content
+        assert "Senior Dev" in user_content
+        assert "Implemented CQRS pipeline in C#." in user_content
+
+    def test_parses_returned_tags(self):
+        mock_resp = Mock()
+        mock_resp.content = [Mock(text='["backend", "csharp"]')]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_resp
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+
+        tagger = self._make_tagger(mock_client, mock_anthropic)
+        result = tagger.tag("Built C# services.", {"company": "X", "role": "Y", "period": ""})
+
+        assert result == ["backend", "csharp"]
+
+    def test_api_failure_returns_empty_list(self):
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = Exception("network error")
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+
+        tagger = self._make_tagger(mock_client, mock_anthropic)
+        result = tagger.tag("Some bullet.", {"company": "X", "role": "Y", "period": ""})
+
+        assert result == []
+
+    def test_invalid_json_response_returns_empty_list(self):
+        mock_resp = Mock()
+        mock_resp.content = [Mock(text="not valid json at all")]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_resp
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+
+        tagger = self._make_tagger(mock_client, mock_anthropic)
+        result = tagger.tag("Some bullet.", {"company": "X", "role": "Y", "period": ""})
+
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Test 14: get_tagger factory
+# ---------------------------------------------------------------------------
+
+
+class TestGetTagger:
+    def test_none_returns_none(self):
+        # "none" means "use built-in keyword matching" — no tagger object needed
+        assert bys.get_tagger("none") is None
+
+    def test_claude_missing_key_returns_none_and_warns(self, monkeypatch, capsys):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        tagger = bys.get_tagger("claude")
+        assert tagger is None
+        assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+    def test_claude_with_key_returns_claude_tagger(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        mock_anthropic = MagicMock()
+        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+            tagger = bys.get_tagger("claude")
+        assert isinstance(tagger, bys.ClaudeTagger)
