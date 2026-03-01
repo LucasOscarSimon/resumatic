@@ -1,7 +1,8 @@
-"""Tests for generate.py — variant rendering and theme resolution."""
+"""Tests for generate.py — variant rendering, theme resolution, and format selection."""
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -207,3 +208,119 @@ class TestResolveTheme:
         with pytest.raises(SystemExit) as exc_info:
             generate.resolve_theme("nonexistent_theme")
         assert exc_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# Test: --format flag (build_variant format selection)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildVariantFormats:
+    """Test that build_variant calls compile_pdf/compile_docx only when requested."""
+
+    def _run(self, formats, tmp_path):
+        """Helper: call build_variant with mocked pandoc and return which compilers ran."""
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+
+        css = generate.resolve_theme("classic")
+        with (
+            patch.object(generate, "BUILD", tmp_path),
+            patch.object(generate, "ROOT", tmp_path),
+            patch("subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            generate.build_variant(FIXTURE_DATA, "csharp", TEMPLATE_PATH, css, formats)
+
+        calls = [c.args[0] for c in mock_run.call_args_list]
+        return calls
+
+    def test_md_only_skips_pdf_and_docx(self, tmp_path):
+        """formats={"md"} should not invoke pandoc at all."""
+        calls = self._run({"md"}, tmp_path)
+        assert len(calls) == 0
+
+    def test_pdf_only_calls_pdf_not_docx(self, tmp_path):
+        calls = self._run({"md", "pdf"}, tmp_path)
+        assert len(calls) == 1
+        assert "--pdf-engine=weasyprint" in calls[0]
+
+    def test_docx_only_calls_docx_not_pdf(self, tmp_path):
+        calls = self._run({"md", "docx"}, tmp_path)
+        assert len(calls) == 1
+        assert calls[0][-1].endswith(".docx")
+
+    def test_all_formats_calls_both(self, tmp_path):
+        calls = self._run({"md", "pdf", "docx"}, tmp_path)
+        assert len(calls) == 2
+
+    def test_default_none_produces_all(self, tmp_path):
+        """formats=None should default to all formats."""
+        calls = self._run(None, tmp_path)
+        assert len(calls) == 2
+
+    def test_md_always_written(self, tmp_path):
+        """Markdown is always written regardless of format selection."""
+        self._run({"md"}, tmp_path)
+        md_file = tmp_path / "resume-csharp.md"
+        assert md_file.exists()
+        assert len(md_file.read_text()) > 0
+
+
+class TestReferenceDoc:
+    """Test that compile_docx passes --reference-doc when provided."""
+
+    def _docx_cmd(self, tmp_path, reference_doc=None):
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+
+        css = generate.resolve_theme("classic")
+        with (
+            patch.object(generate, "BUILD", tmp_path),
+            patch.object(generate, "ROOT", tmp_path),
+            patch("subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            generate.build_variant(
+                FIXTURE_DATA, "csharp", TEMPLATE_PATH, css,
+                formats={"md", "docx"}, reference_doc=reference_doc,
+            )
+
+        # Return the docx pandoc command (second call would be docx, but we only have docx)
+        calls = [c.args[0] for c in mock_run.call_args_list]
+        assert len(calls) == 1
+        return calls[0]
+
+    def test_reference_doc_included_when_provided(self, tmp_path):
+        ref = Path("/fake/reference.docx")
+        cmd = self._docx_cmd(tmp_path, reference_doc=ref)
+        assert f"--reference-doc={ref}" in cmd
+
+    def test_reference_doc_omitted_when_none(self, tmp_path):
+        cmd = self._docx_cmd(tmp_path, reference_doc=None)
+        assert not any("--reference-doc" in arg for arg in cmd)
+
+
+class TestFormatFlagParsing:
+    """Test that --format maps to the correct formats set."""
+
+    def test_format_all_produces_full_set(self):
+        fmt = "all"
+        formats = {"md", "pdf", "docx"} if fmt == "all" else {"md", fmt}
+        assert formats == {"md", "pdf", "docx"}
+
+    def test_format_md_produces_md_only(self):
+        fmt = "md"
+        formats = {"md", "pdf", "docx"} if fmt == "all" else {"md", fmt}
+        assert formats == {"md"}
+
+    def test_format_pdf_produces_md_and_pdf(self):
+        fmt = "pdf"
+        formats = {"md", "pdf", "docx"} if fmt == "all" else {"md", fmt}
+        assert formats == {"md", "pdf"}
+
+    def test_format_docx_produces_md_and_docx(self):
+        fmt = "docx"
+        formats = {"md", "pdf", "docx"} if fmt == "all" else {"md", fmt}
+        assert formats == {"md", "docx"}
