@@ -1,0 +1,53 @@
+{#- Jinja2 template for resume.yaml → Markdown.
+    target_tag: the variant being built (e.g. "csharp", "python")
+    An entry/bullet with no x-tags is treated as common (shown in all variants).
+    A bullet with no x-tags inherits its parent entry's tags.
+-#}
+
+{%- macro visible(node_tags, parent_tags=None) -%}
+  {#- Returns True if this node should appear in the target variant. -#}
+  {%- set effective = node_tags if node_tags is not none else (parent_tags if parent_tags else ["common"]) -%}
+  {{ target_tag in effective or "common" in effective }}
+{%- endmacro -%}
+
+# {{ data.basics.name }}
+
+{{ data.basics.email }} | {{ data.basics.phone }} | {{ data.basics.location }}
+
+---
+
+## Experience
+
+{% for job in data.work %}
+{%- set job_tags = job.get("x-tags", ["common"]) %}
+{%- if not job.get("x-hidden") and (target_tag in job_tags or "common" in job_tags) %}
+
+### {{ job.position }} — {{ job.company }}
+
+*{{ job.startDate }} – {{ job.get("endDate", "present") }}*
+
+{% for h in job.get("highlights", []) %}
+{%- set bullet_tags = h.get("x-tags", job_tags) %}
+{%- if target_tag in bullet_tags or "common" in bullet_tags %}
+- {{ h.text }}
+{% endif %}
+{%- endfor %}
+{% endif %}
+{%- endfor %}
+
+---
+
+## Education
+
+{% for edu in data.education %}
+**{{ edu.studyType }}, {{ edu.area }}** — {{ edu.institution }}
+*Graduated {{ edu.endDate }}*
+{% endfor %}
+
+---
+
+## Skills
+
+{% for skill_group in data.skills %}
+**{{ skill_group.name }}:** {% set kws = [] %}{% for kw in skill_group.get("keywords", []) %}{% set kw_tags = kw.get("x-tags", ["common"]) if kw is mapping else ["common"] %}{% if target_tag in kw_tags or "common" in kw_tags %}{% if kws.append(kw.name if kw is mapping else kw) %}{% endif %}{% endif %}{% endfor %}{{ kws | join(", ") }}
+{% endfor %}

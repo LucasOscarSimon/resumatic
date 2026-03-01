@@ -1,0 +1,66 @@
+/* WeasyPrint stylesheet — ATS-safe, single-column layout */
+
+@page {
+  size: A4;
+  margin: 18mm 20mm 18mm 20mm;
+}
+
+body {
+  font-family: "Liberation Serif", "Times New Roman", serif;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: #111;
+}
+
+h1 {
+  font-size: 20pt;
+  margin-bottom: 2pt;
+  border-bottom: 1.5pt solid #333;
+  padding-bottom: 3pt;
+}
+
+h2 {
+  font-size: 13pt;
+  margin-top: 14pt;
+  margin-bottom: 4pt;
+  border-bottom: 0.5pt solid #888;
+}
+
+h3 {
+  font-size: 11pt;
+  margin-top: 10pt;
+  margin-bottom: 2pt;
+}
+
+p {
+  margin: 3pt 0;
+}
+
+ul {
+  margin: 4pt 0 4pt 16pt;
+  padding: 0;
+}
+
+li {
+  margin-bottom: 2pt;
+}
+
+hr {
+  border: none;
+  border-top: 0.5pt solid #ccc;
+  margin: 10pt 0;
+}
+
+em {
+  font-style: italic;
+  color: #444;
+}
+
+strong {
+  font-weight: bold;
+}
+
+/* Prevent orphaned headings */
+h2, h3 {
+  page-break-after: avoid;
+}

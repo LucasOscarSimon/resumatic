@@ -1,0 +1,74 @@
+/* compact.css — WeasyPrint stylesheet — ATS-safe, single-column layout */
+/* Dense layout optimised for fitting maximum content on fewer pages. */
+
+@page {
+  size: A4;
+  margin: 12mm 14mm 12mm 14mm;
+}
+
+body {
+  font-family: "Liberation Serif", "Times New Roman", serif;
+  font-size: 9.5pt;
+  line-height: 1.25;
+  color: #111;
+  font-variant-ligatures: none;
+  column-count: 1;
+}
+
+h1 {
+  font-size: 16pt;
+  margin-bottom: 1pt;
+  border-bottom: 1pt solid #333;
+  padding-bottom: 2pt;
+}
+
+h2 {
+  font-size: 11pt;
+  margin-top: 8pt;
+  margin-bottom: 2pt;
+  border-bottom: 0.5pt solid #888;
+}
+
+h3 {
+  font-size: 9.5pt;
+  margin-top: 6pt;
+  margin-bottom: 1pt;
+}
+
+p {
+  margin: 2pt 0;
+}
+
+ul {
+  margin: 2pt 0 2pt 14pt;
+  padding: 0;
+}
+
+li {
+  margin-bottom: 1pt;
+}
+
+hr {
+  border: none;
+  border-top: 0.5pt solid #ccc;
+  margin: 6pt 0;
+}
+
+em {
+  font-style: italic;
+  color: #444;
+}
+
+strong {
+  font-weight: bold;
+}
+
+/* Prevent orphaned headings */
+h2, h3 {
+  page-break-after: avoid;
+}
+
+/* Prevent page breaks inside job entries and list items */
+li {
+  page-break-inside: avoid;
+}

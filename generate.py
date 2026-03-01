@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Generate targeted CV variants from resume.yaml via Jinja2 → Pandoc → WeasyPrint."""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+from jinja2 import Environment, FileSystemLoader
+
+ROOT = Path(__file__).parent
+BUILD = ROOT / "build"
+VARIANTS = ["csharp", "python"]
+
+
+def load_yaml(path: Path) -> dict:
+    with path.open() as f:
+        return yaml.safe_load(f)
+
+
+def render_markdown(data: dict, tag: str, template_path: Path) -> str:
+    env = Environment(
+        loader=FileSystemLoader(str(template_path.parent)),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    tmpl = env.get_template(template_path.name)
+    return tmpl.render(data=data, target_tag=tag)
+
+
+def compile_pdf(md_path: Path, css_path: Path, pdf_path: Path) -> None:
+    cmd = [
+        "pandoc",
+        str(md_path),
+        "--pdf-engine=weasyprint",
+        f"--css={css_path}",
+        "-o",
+        str(pdf_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"[error] pandoc failed for {md_path.name}:\n{result.stderr}", file=sys.stderr)
+        sys.exit(result.returncode)
+
+
+def build_variant(data: dict, tag: str, template: Path, css: Path) -> None:
+    BUILD.mkdir(exist_ok=True)
+    md_path = BUILD / f"resume-{tag}.md"
+    pdf_path = BUILD / f"resume-{tag}.pdf"
+
+    md_content = render_markdown(data, tag, template)
+    md_path.write_text(md_content)
+    print(f"  wrote {md_path.relative_to(ROOT)}")
+
+    compile_pdf(md_path, css, pdf_path)
+    print(f"  wrote {pdf_path.relative_to(ROOT)}")
+
+
+def resolve_theme(theme: str) -> Path:
+    css_path = ROOT / "templates" / "themes" / f"{theme}.css"
+    if not css_path.exists():
+        available = sorted(p.stem for p in (ROOT / "templates" / "themes").glob("*.css"))
+        print(
+            f"[error] theme '{theme}' not found at {css_path}\n"
+            f"        available themes: {', '.join(available)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return css_path
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Build CV variant PDFs.")
+    parser.add_argument(
+        "--variant",
+        choices=VARIANTS,
+        help="Build a single variant (default: all)",
+    )
+    parser.add_argument(
+        "--theme",
+        default="classic",
+        help="CSS theme name from templates/themes/ (default: classic)",
+    )
+    args = parser.parse_args()
+
+    data = load_yaml(ROOT / "resume.yaml")
+    template = ROOT / "resume.md.j2"
+    css = resolve_theme(args.theme)
+
+    targets = [args.variant] if args.variant else VARIANTS
+    for tag in targets:
+        print(f"Building variant: {tag}")
+        build_variant(data, tag, template, css)
+
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()

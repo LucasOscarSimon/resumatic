@@ -1,0 +1,36 @@
+# Generated artifacts — never commit
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Resume source — never commit
+resume.yaml
+*.yaml
+*.yml
+
+# Editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Secrets / personal data drafts
+*.env
+*.secret
+.claude/settings.local.json
+*.docx
+!templates/reference.docx
+
+# Resume source documents — never commit
+resume.docx
+resume.pdf
+resume.md
+resume.yaml
+
+# Hash file for change detection
+.resume_source.hash
