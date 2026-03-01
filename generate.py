@@ -44,10 +44,19 @@ def compile_pdf(md_path: Path, css_path: Path, pdf_path: Path) -> None:
         sys.exit(result.returncode)
 
 
+def compile_docx(md_path: Path, docx_path: Path) -> None:
+    cmd = ["pandoc", str(md_path), "-o", str(docx_path)]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"[error] pandoc failed for {md_path.name}:\n{result.stderr}", file=sys.stderr)
+        sys.exit(result.returncode)
+
+
 def build_variant(data: dict, tag: str, template: Path, css: Path) -> None:
     BUILD.mkdir(exist_ok=True)
     md_path = BUILD / f"resume-{tag}.md"
     pdf_path = BUILD / f"resume-{tag}.pdf"
+    docx_path = BUILD / f"resume-{tag}.docx"
 
     md_content = render_markdown(data, tag, template)
     md_path.write_text(md_content)
@@ -55,6 +64,9 @@ def build_variant(data: dict, tag: str, template: Path, css: Path) -> None:
 
     compile_pdf(md_path, css, pdf_path)
     print(f"  wrote {pdf_path.relative_to(ROOT)}")
+
+    compile_docx(md_path, docx_path)
+    print(f"  wrote {docx_path.relative_to(ROOT)}")
 
 
 def resolve_theme(theme: str) -> Path:
