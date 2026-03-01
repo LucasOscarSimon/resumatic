@@ -12,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 ROOT = Path(__file__).parent
 BUILD = ROOT / "build"
 VARIANTS = ["csharp", "python"]
+FORMATS = ["md", "pdf", "docx", "all"]
 
 
 def load_yaml(path: Path) -> dict:
@@ -52,21 +53,27 @@ def compile_docx(md_path: Path, docx_path: Path) -> None:
         sys.exit(result.returncode)
 
 
-def build_variant(data: dict, tag: str, template: Path, css: Path) -> None:
+def build_variant(
+    data: dict, tag: str, template: Path, css: Path, formats: set[str] | None = None,
+) -> None:
+    if formats is None:
+        formats = {"md", "pdf", "docx"}
     BUILD.mkdir(exist_ok=True)
     md_path = BUILD / f"resume-{tag}.md"
-    pdf_path = BUILD / f"resume-{tag}.pdf"
-    docx_path = BUILD / f"resume-{tag}.docx"
 
     md_content = render_markdown(data, tag, template)
     md_path.write_text(md_content)
     print(f"  wrote {md_path.relative_to(ROOT)}")
 
-    compile_pdf(md_path, css, pdf_path)
-    print(f"  wrote {pdf_path.relative_to(ROOT)}")
+    if "pdf" in formats:
+        pdf_path = BUILD / f"resume-{tag}.pdf"
+        compile_pdf(md_path, css, pdf_path)
+        print(f"  wrote {pdf_path.relative_to(ROOT)}")
 
-    compile_docx(md_path, docx_path)
-    print(f"  wrote {docx_path.relative_to(ROOT)}")
+    if "docx" in formats:
+        docx_path = BUILD / f"resume-{tag}.docx"
+        compile_docx(md_path, docx_path)
+        print(f"  wrote {docx_path.relative_to(ROOT)}")
 
 
 def resolve_theme(theme: str) -> Path:
@@ -94,7 +101,17 @@ def main() -> None:
         default="classic",
         help="CSS theme name from templates/themes/ (default: classic)",
     )
+    parser.add_argument(
+        "--format",
+        choices=FORMATS,
+        default="all",
+        dest="output_format",
+        help="Output format: md, pdf, docx, or all (default: all)",
+    )
     args = parser.parse_args()
+
+    fmt = args.output_format
+    formats = {"md", "pdf", "docx"} if fmt == "all" else {"md", fmt}
 
     data = load_yaml(ROOT / "resume.yaml")
     template = ROOT / "resume.md.j2"
@@ -103,7 +120,7 @@ def main() -> None:
     targets = [args.variant] if args.variant else VARIANTS
     for tag in targets:
         print(f"Building variant: {tag}")
-        build_variant(data, tag, template, css)
+        build_variant(data, tag, template, css, formats)
 
     print("Done.")
 
