@@ -1,22 +1,20 @@
 {#- Jinja2 template for resume.yaml → Markdown.
     target_tag: the variant being built (e.g. "csharp", "python")
+    all_variants: full list of variant tags (e.g. ["csharp", "python"])
     An entry/bullet with no x-tags is treated as common (shown in all variants).
     A bullet with no x-tags inherits its parent entry's tags.
     "backend" is a pass-through tag that appears in all variants.
 -#}
 
 {%- macro visible(node_tags, parent_tags=None) -%}
-  {#- Returns True if this node should appear in the target variant.
+  {#- Returns "True" if this node should appear in the target variant.
       "backend" is a pass-through ONLY when no other variant-specific tag is present.
       e.g. [backend] → all variants; [backend, csharp] → csharp only. -#}
   {%- set effective = node_tags if node_tags is not none else (parent_tags if parent_tags else ["common"]) -%}
-  {%- set _other = ["csharp", "python"] | reject("equalto", target_tag) | list -%}
+  {%- set _other = all_variants | reject("equalto", target_tag) | list -%}
   {%- set _restricted = effective | select("in", _other) | list | length > 0 -%}
   {{ target_tag in effective or "common" in effective or ("backend" in effective and not _restricted) }}
 {%- endmacro -%}
-
-{#- Template-level variable for inline conditions below -#}
-{%- set other_variants = ["csharp", "python"] | reject("equalto", target_tag) | list -%}
 
 # {{ data.meta.name }}
 
@@ -47,7 +45,7 @@
 
 {% for job in data.experience %}
 {%- set job_tags = job.get("x-tags", ["common"]) %}
-{%- if not job.get("x-hidden") and (target_tag in job_tags or "common" in job_tags or ("backend" in job_tags and not (job_tags | select("in", other_variants) | list))) %}
+{%- if not job.get("x-hidden") and visible(job_tags) | trim == "True" %}
 
 ### {{ job.role }} — {{ job.company }}
 
@@ -56,12 +54,12 @@
 {% if job.projects %}
 {% for project in job.projects %}
 {%- set proj_tags = project.get("x-tags", job_tags) %}
-{%- if target_tag in proj_tags or "common" in proj_tags or ("backend" in proj_tags and not (proj_tags | select("in", other_variants) | list)) %}
+{%- if visible(proj_tags) | trim == "True" %}
 **{{ project.name }}** *({{ project.period }})*
 
 {% for bullet in project.get("bullets", []) %}
 {%- set bullet_tags = bullet.get("x-tags", proj_tags) %}
-{%- if target_tag in bullet_tags or "common" in bullet_tags or ("backend" in bullet_tags and not (bullet_tags | select("in", other_variants) | list)) %}
+{%- if visible(bullet_tags) | trim == "True" %}
 - {{ bullet.text }}
 {% endif %}
 {%- endfor %}
@@ -70,7 +68,7 @@
 {% else %}
 {% for bullet in job.get("bullets", []) %}
 {%- set bullet_tags = bullet.get("x-tags", job_tags) %}
-{%- if target_tag in bullet_tags or "common" in bullet_tags or ("backend" in bullet_tags and not (bullet_tags | select("in", other_variants) | list)) %}
+{%- if visible(bullet_tags) | trim == "True" %}
 - {{ bullet.text }}
 {% endif %}
 {%- endfor %}
