@@ -26,7 +26,7 @@ def render_markdown(data: dict, tag: str, template_path: Path) -> str:
         lstrip_blocks=True,
     )
     tmpl = env.get_template(template_path.name)
-    return tmpl.render(data=data, target_tag=tag)
+    return tmpl.render(data=data, target_tag=tag, all_variants=VARIANTS)
 
 
 def compile_pdf(md_path: Path, css_path: Path, pdf_path: Path) -> None:
